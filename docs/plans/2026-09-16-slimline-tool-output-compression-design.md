@@ -57,6 +57,22 @@ Flow per matched tool call:
 6. Claude sees the truncated version. If the omitted middle turns out to matter, Claude just calls `Read`
    on the cache file path like any other file — no new tool, no MCP server, no retrieval protocol to teach it.
 
+### Signal-aware truncation (refinement, not pure positional head+tail)
+
+Motivation: Claude Code already runs autonomous build→test→fail→fix→retest loops on its own (this isn't
+something slimline provides — it's inherent Claude Code agentic behavior). That loop is exactly where huge
+tool outputs pile up (test suites, build logs, browser console dumps), so it's exactly where slimline's
+savings matter most. But pure positional head+tail truncation risks hiding the actual error if it falls in
+the omitted middle of a long log — which would silently break the self-fixing loop by removing the one
+line Claude actually needed to react to. That's a real quality regression, not a hypothetical one, and
+directly conflicts with the "without compromising quality" goal from day one.
+
+Fix: truncation keeps head + tail **plus** any line matching a small set of failure-signal patterns
+regardless of position — e.g. `error`, `fail`, `exception`, `traceback`, `panic`, non-zero exit indicators.
+Those lines are pulled out and appended in an "important lines below" section rather than silently dropped
+in the omitted middle. Cheap to implement (a regex pass over the omitted region before discarding it), and
+directly protects the exact workflow (autonomous debug loops) where this tool is most valuable.
+
 ### Verified against official docs
 
 Confirmed via `code.claude.com/docs/en/hooks.md` (fetched directly, not taken on trust from a sub-agent's
@@ -195,3 +211,4 @@ across sessions.
 | Compression strategy | Simple size-based head+tail truncation, not format-aware |
 | Distribution | Open source, published as an installable npm package (not just a public repo to copy-paste from) |
 | Cross-platform proof | Required GitHub Actions CI matrix (Windows/Mac/Linux) — tested, not assumed |
+| Truncation quality | Signal-aware, not pure positional — always preserve error/failure lines regardless of position, to protect autonomous debug loops |
