@@ -127,6 +127,34 @@ summary, which had the field name slightly wrong):
   delegating wide searches to a subagent (e.g. the `Explore` agent) to keep exploration out of the main
   session's context.
 
+## Packaging & distribution (open source, npm-published)
+
+Decision: this will be given away for free as a properly installable npm package, not just a public
+repo people copy-paste from.
+
+- **Package layout**: a small npm package (name TBD — check availability before committing; "slimline" is
+  a placeholder and may already be taken) containing the compiled hook script plus a tiny CLI entry point
+  (e.g. `npx <name> init`) that writes/merges the `PostToolUse` hook entry into the user's
+  `~/.claude/settings.json` and drops the compiled script somewhere stable (e.g. inside the installed
+  package, referenced by an absolute `node_modules` path, or copied to `~/.claude/slimline/`). Hand-editing
+  JSON is exactly the kind of friction an installer should remove for other people picking this up.
+- **Build step**: source is TypeScript; ship compiled JS in the published package so end users don't need
+  `ts-node` or a TS toolchain just to run a hook. Needs a `tsconfig.json` + build script, and one bin.
+- **License**: MIT (simple, most permissive, standard for small dev-tool packages) unless there's a reason
+  to match Headroom's Apache-2.0.
+- **Docs**: a real top-level README — what it does, install command, config options, limitations
+  (per-tool shape verification status), and a short note on how it differs from Headroom.
+- **Repo hygiene**: `.gitignore` covering `node_modules`, `dist/`, and `.claude/slimline-cache/`; nothing
+  hardcoded to this machine's paths — everything derived from cwd/env at runtime.
+- **Publishing itself requires the user's own npm account** — logging in and running `npm publish` is a
+  public, only-partially-reversible action (npm allows unpublish within a 72-hour window, then it's
+  permanent), so that step happens with the user present and explicitly confirming, not run unattended.
+
+This adds real scope on top of the core hook logic: CLI installer, build tooling, README, license/name
+selection, and a supervised publish step. Revised total v1 estimate (core hook logic + npm packaging):
+**roughly 3.5–4.5 hours** of build time, still realistically split across multiple sessions rather than
+one sitting — versus ~2–2.5 hours for the hook logic alone without the packaging/distribution work.
+
 ## Decisions recap (from brainstorming session, 2026-09-16)
 
 | Question | Decision |
@@ -137,3 +165,4 @@ summary, which had the field name slightly wrong):
 | Language | Node.js/TypeScript |
 | Reversibility | Yes — cache original, retrievable via plain `Read` |
 | Compression strategy | Simple size-based head+tail truncation, not format-aware |
+| Distribution | Open source, published as an installable npm package (not just a public repo to copy-paste from) |
