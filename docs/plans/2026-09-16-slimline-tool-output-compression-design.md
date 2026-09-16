@@ -199,6 +199,48 @@ This adds a real test harness and CI workflow file on top of the hook logic and 
 total v1 estimate: **roughly 4.5–5.5 hours** (hook logic + npm packaging + CI matrix), still splittable
 across sessions.
 
+## Post-v1 roadmap (phases 2-11)
+
+Decided during a second brainstorming pass, once v1 was fully scoped. None of this is built yet — this is
+the backlog to work from once quota/time allows, ordered roughly by when each becomes relevant.
+
+**Build, no real tradeoff (straightforward wins):**
+
+- **Phase 3 — JSON-aware compression**: dedup repeated keys/array structures in JSON tool output. Pure
+  code, no model calls, no added cost. Feeds Phase 10.
+- **Phase 6 — Output-verbosity nudging**: well-crafted `CLAUDE.md` instructions to keep Claude's own
+  replies terser. Zero runtime cost, reduces output tokens directly.
+- **Phase 8 — Savings measurement**: local-only log + a stats command reporting real before/after sizes.
+  No telemetry beacon anywhere, unlike Headroom's opt-out one — nothing leaves the machine.
+- **Phase 9 — Config system**: formalize v1's thresholds into a real config file (already implied by v1,
+  just productionized).
+- **Phase 10 — MCP tool output coverage**: extend matchers to `mcp__.*` once Phase 3 (JSON-aware
+  compression) exists — MCP responses (Supabase, GitHub, etc.) are often huge raw JSON.
+- **Phase 11 — Contributor infrastructure**: architecture doc + a clean plugin interface so new
+  compressors slot in without touching core, plus CONTRIBUTING.md. Mostly writing, not new runtime behavior.
+
+**Decided with real tradeoffs weighed, not rubber-stamped:**
+
+- **Phase 2 — Smart summarization (deferred)**: using a `type: "agent"`/`type: "prompt"` hook to call a
+  cheap model and summarize the omitted middle, instead of pure truncation. Decision: **skip for v1**,
+  revisit only if Phase 8's real measurement data shows plain signal-aware truncation is losing meaningful
+  quality on actual sessions. Reason: this mechanism spends its own tokens (the full omitted text is input
+  to the summarizer call) to save tokens elsewhere — not a pure win the way truncation is, and it mainly
+  helps prose/docs, not the logs/test-output case that's the actual priority.
+- **Phase 4 — Code-aware (AST) compression (deferred)**: needs a parser dependency (e.g. tree-sitter
+  bindings) and is the riskiest, most speculative phase. Decision: **defer until v1 usage data justifies
+  it** — Grep/Read output may already be well-served by signal-aware truncation + JSON-aware compression;
+  don't add parser complexity speculatively.
+- **Phase 5 — `headroom learn` equivalent (build it)**: mine past session transcripts (via the
+  `transcript_path` field already present in hook input) for repeated mistakes/corrections, auto-write to
+  `CLAUDE.local.md`. Decision: **build this** — also uses a model call to do the mining, but the ROI case
+  is stronger than Phase 2's: one analysis pass can prevent the same mistake across many future sessions,
+  not just save tokens on a single tool call.
+- **Phase 7 — Effort/thinking-budget routing (firm non-goal)**: rewriting the outgoing API request's
+  thinking budget/effort per turn requires touching the raw request body, which hooks fundamentally can't
+  do without a proxy. Decision: **accept as a firm limitation** of the no-proxy architecture already chosen
+  — not something to keep chasing. Document clearly rather than silently drop.
+
 ## Upstream contribution to Headroom itself (separate from slimline)
 
 Decision: pursue **both** slimline (this project) and a couple of scoped contributions back to Headroom
