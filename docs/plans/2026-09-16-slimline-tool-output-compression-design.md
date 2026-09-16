@@ -199,6 +199,48 @@ This adds a real test harness and CI workflow file on top of the hook logic and 
 total v1 estimate: **roughly 4.5–5.5 hours** (hook logic + npm packaging + CI matrix), still splittable
 across sessions.
 
+## Upstream contribution to Headroom itself (separate from slimline)
+
+Decision: pursue **both** slimline (this project) and a couple of scoped contributions back to Headroom
+upstream — different goals, different codebases, do both rather than picking one.
+
+Researched against Headroom's actual issue tracker (not just its README) before committing to scope:
+
+- **[#869](https://github.com/headroomlabs-ai/headroom/issues/869)** confirms Headroom's proxy-based
+  `wrap` **does not currently engage in Claude Desktop app / agent mode** — the Desktop app overrides
+  `ANTHROPIC_BASE_URL` itself, so Headroom's routing never takes effect there. Still open.
+- **[#84](https://github.com/headroomlabs-ai/headroom/issues/84)** — Headroom's own community has asked
+  for clarity on whether/how it works for Claude subscription (Pro/Max) accounts at all. Still open.
+- **[#1494](https://github.com/headroomlabs-ai/headroom/issues/1494)** — an existing, separate feature
+  request for a "dev-safe conservative compression profile" that preserves stack traces, file paths,
+  errors, and never touches project rule files (`AGENTS.md`, `README.md`, config files) — same idea as
+  slimline's signal-aware truncation. A follow-up comment on that issue shows someone already tried a
+  strict/lossless version and got **zero measurable savings** (rejected by Headroom's own internal
+  size-floor/tokenizer logic), and that this is entangled with several other in-flight issues/PRs
+  (#2116, #2823, #1877, #3013) — i.e. this is an active, unresolved, multi-contributor epic, not a quick
+  isolated fix. Attempting the *whole* issue is out of scope; a narrow slice of it is not.
+
+**Two scoped contribution targets, chosen for being small and self-contained rather than trying to solve
+the whole epic:**
+
+1. **Docs PR for #84**: document Claude subscription (Pro/Max) deployment accurately, including the
+   Desktop-app override limitation from #869 as a known caveat. Pure documentation, no code risk, and we're
+   unusually well-positioned for it — this is exactly what we researched firsthand for slimline's own design.
+2. **Narrow code PR referencing #1494**: just the "preserve stack traces/file paths/line numbers/exact
+   errors, never compress `AGENTS.md`/`README.md`/config files" rule — the same signal-aware idea already
+   designed for slimline, ported to Headroom's compressors. Explicitly **not** attempting to fix the
+   zero-savings/lossless-mode bug also discussed on that issue — that's a separate, harder, already
+   being-investigated problem.
+
+**Honest assessment of impact**: both are genuine, real improvements for Headroom's broader user base (the
+docs fix saves other subscription users the same confusion; the compression guard is a real safety
+improvement other users have already asked for) — but modest and specific, not a fix for Headroom's deeper
+unresolved issues, and contingent on maintainers actually reviewing and merging either PR.
+
+**Sequencing**: this is downstream of slimline, not a blocker to it — build/ship slimline first (it's the
+thing that actually works in the user's own environment today), then port the proven signal-aware logic
+upstream once it exists and is tested, rather than designing it twice in parallel.
+
 ## Decisions recap (from brainstorming session, 2026-09-16)
 
 | Question | Decision |
