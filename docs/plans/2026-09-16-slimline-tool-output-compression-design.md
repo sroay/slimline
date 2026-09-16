@@ -155,6 +155,34 @@ selection, and a supervised publish step. Revised total v1 estimate (core hook l
 **roughly 3.5–4.5 hours** of build time, still realistically split across multiple sessions rather than
 one sitting — versus ~2–2.5 hours for the hook logic alone without the packaging/distribution work.
 
+## Cross-platform verification (CI matrix, required — not optional)
+
+Decision: cross-platform correctness must be **tested, not assumed**. The Node/TS choice and careful use
+of Node's `path` module make Windows/Mac/Linux compatibility likely, but "likely" isn't the bar for
+something distributed to other people's machines.
+
+- **GitHub Actions workflow** running the test suite on `windows-latest`, `macos-latest`, and
+  `ubuntu-latest` (Linux included too — free to add on GH Actions, and plenty of Claude Code users are on
+  Linux even though it wasn't explicitly asked about).
+- **What the tests actually exercise**, since there's no real Claude Code process to drive in CI: invoke
+  the built hook script directly as a child process, feeding it the same JSON on stdin that Claude Code
+  would send (`tool_name`, `tool_response`, etc., using the real shapes confirmed per tool), and assert on:
+  - stdout JSON matches the expected `hookSpecificOutput.updatedToolOutput` shape for an oversized input.
+  - The cache file is written to the correct path and contains the untouched original.
+  - A small/normal-sized input passes through as a true no-op (no cache file, no stdout).
+  - Path handling specifically: a test case with a Windows-style absolute path in the input and one with a
+    POSIX-style path, confirming the cache file path construction doesn't break on either OS.
+- **This runs on every push**, so a change that works on the dev's machine but breaks on the other OS is
+  caught before anyone installs it, not after.
+- Genuine limitation this doesn't cover: CI proves the *script* behaves correctly on each OS. It does not
+  prove Claude Code's own hook-invocation plumbing behaves identically everywhere — that part is already
+  covered by the docs' explicit "fires the same wherever it runs" guarantee, not something this project
+  can independently verify.
+
+This adds a real test harness and CI workflow file on top of the hook logic and npm packaging. Revised
+total v1 estimate: **roughly 4.5–5.5 hours** (hook logic + npm packaging + CI matrix), still splittable
+across sessions.
+
 ## Decisions recap (from brainstorming session, 2026-09-16)
 
 | Question | Decision |
@@ -166,3 +194,4 @@ one sitting — versus ~2–2.5 hours for the hook logic alone without the packa
 | Reversibility | Yes — cache original, retrievable via plain `Read` |
 | Compression strategy | Simple size-based head+tail truncation, not format-aware |
 | Distribution | Open source, published as an installable npm package (not just a public repo to copy-paste from) |
+| Cross-platform proof | Required GitHub Actions CI matrix (Windows/Mac/Linux) — tested, not assumed |
