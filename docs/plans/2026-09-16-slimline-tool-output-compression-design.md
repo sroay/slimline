@@ -91,6 +91,13 @@ summary, which had the field name slightly wrong):
 - Head/tail line counts: also configurable, default something like 40 head + 40 tail lines.
 - Matcher list (which tools get this treatment): start with `Bash|Grep|Read|WebFetch|WebSearch`, adjust
   based on which of these actually produce oversized output in practice.
+- **Hook scope: register in `~/.claude/settings.json` (user-level), not the project's `.claude/settings.json`.**
+  Per the docs, user-level settings apply to every project opened in Claude Code on this machine, which is
+  what "works for all my sessions" requires. Caveat: Claude Code **cloud/web sessions don't read local
+  `~/.claude/settings.json`** — they only pick up hooks committed into that project's repo. So this covers
+  every local session automatically; a cloud session on a given repo would need the hook committed there too.
+  The cache directory itself still writes per-project (relative to cwd), which is correct and needs no
+  special handling even though the hook registration is global.
 
 ## Testing plan
 
@@ -110,6 +117,15 @@ summary, which had the field name slightly wrong):
   identified but deprioritized for v1.
 - Cache eviction policy.
 - Extending matcher coverage to more tools / MCP tool outputs once core shapes are proven out.
+- **Redundant re-exploration** (Claude re-grepping/re-reading the same codebase context across turns or
+  sessions instead of jumping straight to what it needs) — the third waste source identified during
+  brainstorming. Decision: **don't build this** — adopt an existing tool instead. Headroom itself doesn't
+  build this from scratch either; it leans on **Serena**, an existing open-source MCP server providing
+  LSP-based semantic code navigation (jump to symbol/definition instead of grep-and-read-whole-file).
+  Install/configure Serena as an MCP server whenever convenient — separate from slimline, no design work
+  needed. Cheaper wins available today with zero build: maintaining `CLAUDE.md` project notes, and
+  delegating wide searches to a subagent (e.g. the `Explore` agent) to keep exploration out of the main
+  session's context.
 
 ## Decisions recap (from brainstorming session, 2026-09-16)
 
