@@ -32,6 +32,25 @@ every shape below differs from the others, and two of them are nested.
 Recommended implementation order after Bash: `Grep` (content mode) → `WebFetch` → `Read` (with a higher
 threshold than Bash, since a file read is a deliberate request for content rather than incidental noise).
 
+## Findings from live testing (2026-09-20)
+
+All three of `Grep` (content), `Read`, and `WebFetch` were implemented and verified live in a real session,
+alongside the already-working `Bash`. Two findings worth recording:
+
+1. **`WebFetch` is a low-value target.** Its `result` field holds a *model-generated answer* about the
+   fetched page, not the raw page content — WebFetch already compresses by design. In practice the payload
+   almost never approaches the threshold, so this adapter will rarely fire. Harmless to keep, but it should
+   not be counted toward expected savings.
+2. **The signal pattern is noisy on source code.** Grepping TypeScript source flagged 66 "error/failure"
+   lines that were mostly identifiers (`function fail(...)`, `error` variable names) rather than real
+   failures. The `MAX_SIGNAL_LINES` cap of 50 bounds the damage, and the tradeoff is deliberate — a false
+   positive costs one kept line, a false negative loses the error that a debug loop needed. Worth revisiting
+   only if it proves noisy in practice on real sessions.
+
+`Read` was the important one to get right: its payload is nested under `file.content`, and the live test
+confirmed the nested replacement is accepted rather than silently dropped (1200 lines → 86, with an error
+line buried at position 700 preserved).
+
 ## Version sensitivity — a real distribution risk
 
 A web search turned up [anthropics/claude-code#68951](https://github.com/anthropics/claude-code/issues/68951):

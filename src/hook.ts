@@ -1,17 +1,24 @@
 #!/usr/bin/env node
 /**
- * Slimline PostToolUse hook (Bash-only, v1 slice).
+ * Slimline PostToolUse hook.
  *
- * Reads a Claude Code PostToolUse event on stdin. If the Bash tool's stdout/stderr
- * exceeds a line threshold, replaces it with a head+tail truncation that preserves
- * any error/failure-signal lines regardless of position, caches the full original
- * to disk, and points Claude at the cache file (retrievable via its own Read tool).
+ * Reads a Claude Code PostToolUse event on stdin. If a supported tool's payload
+ * exceeds its line threshold, replaces it with a head+tail truncation that preserves
+ * error/failure-signal lines regardless of position, caches the full original to
+ * disk, and points Claude at the cache file (retrievable via its own Read tool).
  * Under threshold: exits 0 with no output — a true no-op.
+ *
+ * Each tool's replacement must match that tool's own tool_response shape exactly,
+ * or Claude Code silently ignores it. Shapes are verified empirically, not guessed —
+ * see docs/tool-output-shapes.md.
  */
 import * as fs from "fs";
 import * as path from "path";
 
 export const THRESHOLD_LINES = 300;
+// A file read is a deliberate request for content, not incidental noise, so it
+// earns a higher bar before we interfere with it.
+export const READ_THRESHOLD_LINES = 800;
 export const HEAD_LINES = 40;
 export const TAIL_LINES = 40;
 export const MAX_SIGNAL_LINES = 50;
@@ -25,9 +32,12 @@ export interface TruncationResult {
   omittedLines: number;
 }
 
-export function truncateText(text: string): TruncationResult | null {
+export function truncateText(
+  text: string,
+  thresholdLines: number = THRESHOLD_LINES
+): TruncationResult | null {
   const lines = text.split("\n");
-  if (lines.length <= THRESHOLD_LINES) return null;
+  if (lines.length <= thresholdLines) return null;
 
   const head = lines.slice(0, HEAD_LINES);
   const tail = lines.slice(lines.length - TAIL_LINES);
@@ -39,11 +49,11 @@ export function truncateText(text: string): TruncationResult | null {
 
   if (signalLines.length > 0) {
     const shown = signalLines.slice(0, MAX_SIGNAL_LINES);
-    const note =
+    parts.push(
       shown.length < signalLines.length
         ? `[${signalLines.length} possible error/failure line(s) found in the omitted region, showing first ${shown.length}]:`
-        : `[${signalLines.length} possible error/failure line(s) found in the omitted region]:`;
-    parts.push(note);
+        : `[${signalLines.length} possible error/failure line(s) found in the omitted region]:`
+    );
     parts.push(shown.join("\n"));
   }
 
@@ -52,17 +62,91 @@ export function truncateText(text: string): TruncationResult | null {
   return { text: parts.join("\n"), omittedLines: middle.length };
 }
 
+/** One payload within a tool_response that is a candidate for truncation. */
+interface Payload {
+  key: string;
+  text: string;
+}
+
+/**
+ * Per-tool adapter. Each tool stores its bulk payload in a different place —
+ * Read nests it under file.content, Grep's location depends on its mode — so
+ * extraction and reassembly are tool-specific by necessity.
+ */
+interface ToolSpec {
+  thresholdLines: number;
+  getPayloads(response: any): Payload[];
+  withReplacements(response: any, replacements: Map<string, string>): object;
+}
+
+export const TOOL_SPECS: Record<string, ToolSpec> = {
+  Bash: {
+    thresholdLines: THRESHOLD_LINES,
+    getPayloads(response) {
+      const payloads: Payload[] = [];
+      if (typeof response.stdout === "string") payloads.push({ key: "stdout", text: response.stdout });
+      if (typeof response.stderr === "string") payloads.push({ key: "stderr", text: response.stderr });
+      return payloads;
+    },
+    withReplacements(response, replacements) {
+      return {
+        stdout: replacements.get("stdout") ?? response.stdout,
+        stderr: replacements.get("stderr") ?? response.stderr,
+        interrupted: response.interrupted ?? false,
+        isImage: response.isImage ?? false,
+      };
+    },
+  },
+
+  Grep: {
+    thresholdLines: THRESHOLD_LINES,
+    getPayloads(response) {
+      // Only content mode carries a large string. files_with_matches/count return
+      // filename arrays that are already modest, and cutting a file list risks
+      // hiding a path Claude needs.
+      if (response.mode !== "content" || typeof response.content !== "string") return [];
+      return [{ key: "content", text: response.content }];
+    },
+    withReplacements(response, replacements) {
+      return { ...response, content: replacements.get("content") ?? response.content };
+    },
+  },
+
+  WebFetch: {
+    thresholdLines: THRESHOLD_LINES,
+    getPayloads(response) {
+      if (typeof response.result !== "string") return [];
+      return [{ key: "result", text: response.result }];
+    },
+    withReplacements(response, replacements) {
+      return { ...response, result: replacements.get("result") ?? response.result };
+    },
+  },
+
+  Read: {
+    thresholdLines: READ_THRESHOLD_LINES,
+    getPayloads(response) {
+      if (!response.file || typeof response.file.content !== "string") return [];
+      return [{ key: "file.content", text: response.file.content }];
+    },
+    withReplacements(response, replacements) {
+      return {
+        ...response,
+        file: {
+          ...response.file,
+          content: replacements.get("file.content") ?? response.file.content,
+        },
+      };
+    },
+  },
+};
+
 interface PostToolUseInput {
   session_id?: string;
   cwd?: string;
   tool_name?: string;
   tool_use_id?: string;
-  tool_response?: {
-    stdout?: string;
-    stderr?: string;
-    interrupted?: boolean;
-    isImage?: boolean;
-  };
+  tool_response?: any;
 }
 
 export function buildCachePath(cwd: string, sessionId: string, toolUseId: string): string {
@@ -73,41 +157,40 @@ export function handleEvent(
   input: PostToolUseInput,
   writeCache: (cachePath: string, content: string) => void
 ): object | null {
-  if (input.tool_name !== "Bash") return null;
+  const spec = input.tool_name ? TOOL_SPECS[input.tool_name] : undefined;
+  if (!spec) return null;
 
   const response = input.tool_response;
-  if (!response || typeof response.stdout !== "string") return null;
+  if (!response || typeof response !== "object") return null;
 
-  const stdoutResult = truncateText(response.stdout);
-  const stderrResult = typeof response.stderr === "string" ? truncateText(response.stderr) : null;
+  const payloads = spec.getPayloads(response);
+  if (payloads.length === 0) return null;
 
-  if (!stdoutResult && !stderrResult) return null; // true no-op, under threshold
+  const truncated = new Map<string, TruncationResult>();
+  for (const payload of payloads) {
+    const result = truncateText(payload.text, spec.thresholdLines);
+    if (result) truncated.set(payload.key, result);
+  }
+  if (truncated.size === 0) return null; // true no-op, everything under threshold
 
   const cwd = input.cwd || process.cwd();
   const sessionId = input.session_id || "unknown-session";
   const toolUseId = input.tool_use_id || `slimline-${Date.now()}`;
   const cachePath = buildCachePath(cwd, sessionId, toolUseId);
 
-  const original = [
-    "=== stdout ===",
-    response.stdout,
-    "",
-    "=== stderr ===",
-    response.stderr || "",
-  ].join("\n");
-  writeCache(cachePath, original);
+  // Cache every payload, not just the truncated ones, so the cache file is a
+  // faithful record of the whole original response.
+  const cacheBody = payloads.map((p) => `=== ${p.key} ===\n${p.text}`).join("\n\n");
+  writeCache(cachePath, cacheBody);
 
   const marker = `\n\n[Full original output cached at: ${cachePath} — Read it if the above isn't enough]`;
+  const replacements = new Map<string, string>();
+  for (const [key, result] of truncated) replacements.set(key, result.text + marker);
 
   return {
     hookSpecificOutput: {
       hookEventName: "PostToolUse",
-      updatedToolOutput: {
-        stdout: stdoutResult ? stdoutResult.text + marker : response.stdout,
-        stderr: stderrResult ? stderrResult.text + marker : response.stderr,
-        interrupted: response.interrupted ?? false,
-        isImage: response.isImage ?? false,
-      },
+      updatedToolOutput: spec.withReplacements(response, replacements),
     },
   };
 }
