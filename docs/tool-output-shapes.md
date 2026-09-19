@@ -51,6 +51,33 @@ alongside the already-working `Bash`. Two findings worth recording:
 confirmed the nested replacement is accepted rather than silently dropped (1200 lines → 86, with an error
 line buried at position 700 preserved).
 
+## Claude Code caps Bash output at 30,000 chars BEFORE any hook runs
+
+Found by monitoring real traffic on 2026-09-20, and it corrects an assumption baked into the original design.
+
+A deliberately generated 2,500-line (~100KB) Bash output arrived at the hook as **exactly 30,000
+characters**. This matches the Bash tool's own documented behaviour ("if the output exceeds 30000
+characters, output will be truncated"). The cut is naive: it keeps the head and discards everything after,
+mid-line if necessary.
+
+Three consequences, all of which matter:
+
+1. **The per-call savings ceiling is 30,000 chars (~7,500 tokens), not the command's true output size.**
+   Savings estimates must not be extrapolated from raw command output — a 100KB log and a 30KB log present
+   identically to the hook. Measured on the real call: 30,000 → 3,527 chars, an 88% reduction, ~6,600
+   estimated tokens saved on that single call. Real and worthwhile, but bounded.
+2. **The cache is not always the complete original.** For output over the cap, the tail was already
+   discarded before slimline existed in the pipeline. The truncation marker now says "Output as received"
+   rather than "Full original output" — overclaiming here would actively mislead a debugging loop that went
+   looking for something the cache never had.
+3. **Slimline still improves on the native cap, for a reason worth stating.** Claude Code's built-in
+   truncation keeps only the head, so the *end* of a long run — exit status, summary line, final error — is
+   exactly what gets thrown away. Slimline keeps head **and** tail **and** surfaced error lines within a
+   far smaller budget. So the win is not only fewer tokens, it is better-chosen tokens.
+
+Whether `Read`, `Grep`, and `WebFetch` have equivalent upstream caps has not been verified. Worth checking
+before quoting savings figures for them.
+
 ## Version sensitivity — a real distribution risk
 
 A web search turned up [anthropics/claude-code#68951](https://github.com/anthropics/claude-code/issues/68951):

@@ -199,7 +199,11 @@ export function handleEvent(
   const cacheBody = payloads.map((p) => `=== ${p.key} ===\n${p.text}`).join("\n\n");
   writeCache(cachePath, cacheBody);
 
-  const marker = `\n\n[Full original output cached at: ${cachePath} — Read it if the above isn't enough]`;
+  // Deliberately says "as received", not "full original": Claude Code caps some
+  // tool output before any hook sees it (Bash hard-cuts at 30,000 chars), so what
+  // we cache is everything that reached us, which is not always everything the
+  // command actually produced. Claiming otherwise would mislead a debugging loop.
+  const marker = `\n\n[Output as received cached at: ${cachePath} — Read it if the above isn't enough]`;
   const replacements = new Map<string, string>();
   for (const [key, result] of truncated) replacements.set(key, result.text + marker);
 
