@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.claude/slimline-cache/
+.claude/test-payload.json
+.claude/test-output.json
