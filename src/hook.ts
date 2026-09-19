@@ -14,6 +14,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
+import { logEvent, StatsEvent } from "./stats";
 
 export const THRESHOLD_LINES = 300;
 // A file read is a deliberate request for content, not incidental noise, so it
@@ -155,7 +156,8 @@ export function buildCachePath(cwd: string, sessionId: string, toolUseId: string
 
 export function handleEvent(
   input: PostToolUseInput,
-  writeCache: (cachePath: string, content: string) => void
+  writeCache: (cachePath: string, content: string) => void,
+  logStats: (event: StatsEvent) => void = () => {}
 ): object | null {
   const spec = input.tool_name ? TOOL_SPECS[input.tool_name] : undefined;
   if (!spec) return null;
@@ -166,12 +168,26 @@ export function handleEvent(
   const payloads = spec.getPayloads(response);
   if (payloads.length === 0) return null;
 
+  const beforeChars = payloads.reduce((sum, p) => sum + p.text.length, 0);
+  const record = (truncated: boolean, afterChars: number) =>
+    logStats({
+      ts: new Date().toISOString(),
+      tool: input.tool_name!,
+      sessionId: input.session_id || "unknown-session",
+      truncated,
+      beforeChars,
+      afterChars,
+    });
+
   const truncated = new Map<string, TruncationResult>();
   for (const payload of payloads) {
     const result = truncateText(payload.text, spec.thresholdLines);
     if (result) truncated.set(payload.key, result);
   }
-  if (truncated.size === 0) return null; // true no-op, everything under threshold
+  if (truncated.size === 0) {
+    record(false, beforeChars); // logged so the hit rate reflects what passed through untouched
+    return null;
+  }
 
   const cwd = input.cwd || process.cwd();
   const sessionId = input.session_id || "unknown-session";
@@ -186,6 +202,12 @@ export function handleEvent(
   const marker = `\n\n[Full original output cached at: ${cachePath} — Read it if the above isn't enough]`;
   const replacements = new Map<string, string>();
   for (const [key, result] of truncated) replacements.set(key, result.text + marker);
+
+  const afterChars = payloads.reduce(
+    (sum, p) => sum + (replacements.get(p.key) ?? p.text).length,
+    0
+  );
+  record(true, afterChars);
 
   return {
     hookSpecificOutput: {
@@ -219,7 +241,8 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const output = handleEvent(input, writeCacheToDisk);
+  const cwd = input.cwd || process.cwd();
+  const output = handleEvent(input, writeCacheToDisk, (event) => logEvent(cwd, event));
   if (output) {
     process.stdout.write(JSON.stringify(output));
   }

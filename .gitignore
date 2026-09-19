@@ -4,3 +4,4 @@ dist/
 .claude/test-payload.json
 .claude/test-output.json
 .claude/shapes.jsonl
+.claude/slimline-stats.jsonl
