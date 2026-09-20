@@ -5,3 +5,5 @@ dist/
 .claude/test-output.json
 .claude/shapes.jsonl
 .claude/slimline-stats.jsonl
+.claude/settings.json
+.claude/settings.local.json

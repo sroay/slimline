@@ -132,8 +132,21 @@ Claude Code sends every matching tool result to the hook on stdin. The hook repl
 ```bash
 npm install
 npm run build
-npm test
+npm test          # unit tests
+npm run smoke     # drives the built hook as a subprocess, like Claude Code does
+npm run doctor    # self-test probe
 ```
+
+Cloning this repo does **not** activate the hook. `.claude/settings.json` is deliberately untracked — a
+tool that rewrites what the model sees should never switch itself on just because you opened a directory.
+To dogfood it while working on it, opt in:
+
+```bash
+npm run build && node dist/cli.js install --project
+```
+
+That writes to `.claude/settings.local.json`, which is also untracked. Remove it with
+`node dist/cli.js uninstall --project`.
 
 Prior art: [headroomlabs-ai/headroom](https://github.com/headroomlabs-ai/headroom), which is far larger — Rust/Python, an ML compression model, a proxy server. slimline targets one waste source with one hook, partly because headroom's proxy-based `wrap` doesn't engage in Claude Desktop app mode.
 
