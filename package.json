@@ -4,11 +4,36 @@
   "description": "Claude Code PostToolUse hook that truncates oversized tool output (signal-aware: preserves error/failure lines) to save subscription quota, with a local retrievable cache of the original.",
   "license": "MIT",
   "type": "commonjs",
+  "main": "dist/hook.js",
+  "bin": {
+    "slimline": "dist/cli.js"
+  },
+  "files": [
+    "dist/**/*.js",
+    "!dist/**/*.test.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "hook",
+    "posttooluse",
+    "tokens",
+    "quota",
+    "context-window",
+    "truncation"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "node --test dist/*.test.js",
     "stats": "node dist/stats.js",
-    "audit": "node dist/audit.js"
+    "audit": "node dist/audit.js",
+    "doctor": "node dist/cli.js doctor",
+    "prepublishOnly": "npm run build && npm test"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

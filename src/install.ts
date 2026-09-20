@@ -20,10 +20,12 @@ export interface MergeOptions {
   statsDir?: string;
 }
 
+export type SettingsAction = "added" | "updated" | "unchanged" | "removed" | "absent";
+
 export interface MergeResult {
   settings: Record<string, unknown>;
   changed: boolean;
-  action: "added" | "updated" | "unchanged";
+  action: SettingsAction;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -93,6 +95,36 @@ export function mergeHookIntoSettings(
   }
   entries[index] = desired;
   return { settings, changed: true, action: "updated" };
+}
+
+/**
+ * Take slimline's entry back out, leaving everything else exactly as it was.
+ *
+ * Uninstalling has to be as trustworthy as installing: an empty `PostToolUse` key
+ * left behind would be harmless but is still litter in a file the user owns, so
+ * empty containers are pruned and the file returns to its original shape.
+ */
+export function removeHookFromSettings(existing: unknown): MergeResult {
+  if (existing !== undefined && existing !== null && !isPlainObject(existing)) {
+    throw new Error("slimline: refusing to touch — settings is not a JSON object.");
+  }
+
+  const settings: Record<string, unknown> = existing ? structuredClone(existing) : {};
+  const hooks = settings.hooks;
+  if (!isPlainObject(hooks) || !Array.isArray(hooks.PostToolUse)) {
+    return { settings, changed: false, action: "absent" };
+  }
+
+  const kept = hooks.PostToolUse.filter((entry) => !isSlimlineEntry(entry));
+  if (kept.length === hooks.PostToolUse.length) {
+    return { settings, changed: false, action: "absent" };
+  }
+
+  if (kept.length > 0) hooks.PostToolUse = kept;
+  else delete hooks.PostToolUse;
+  if (Object.keys(hooks).length === 0) delete settings.hooks;
+
+  return { settings, changed: true, action: "removed" };
 }
 
 /**

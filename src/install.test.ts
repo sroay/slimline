@@ -2,6 +2,7 @@ import { test } from "node:test";
 import * as assert from "node:assert/strict";
 import {
   mergeHookIntoSettings,
+  removeHookFromSettings,
   MATCHER,
   buildSelfTestInput,
   interpretSelfTest,
@@ -209,6 +210,62 @@ test("interpretSelfTest: output that did not actually shrink fails", () => {
 
   assert.equal(verdict.ok, false);
   assert.match(verdict.reason, /smaller|shrink|reduc/i);
+});
+
+test("remove: takes slimline's entry out and reports that it did", () => {
+  const installed = mergeHookIntoSettings(undefined, HOOK);
+
+  const { settings, action, changed } = removeHookFromSettings(installed.settings);
+
+  assert.equal(action, "removed");
+  assert.equal(changed, true);
+  assert.equal((settings as any).hooks, undefined);
+});
+
+test("remove: on settings that never had slimline, reports absent and changes nothing", () => {
+  const existing = { permissions: { allow: ["x"] } };
+
+  const { settings, action, changed } = removeHookFromSettings(existing);
+
+  assert.equal(action, "absent");
+  assert.equal(changed, false);
+  assert.deepEqual(settings, existing);
+});
+
+test("remove: leaves other people's PostToolUse hooks alone", () => {
+  const theirs = {
+    matcher: "Write",
+    hooks: [{ type: "command", command: "prettier", args: ["--write"] }],
+  };
+  const installed = mergeHookIntoSettings({ hooks: { PostToolUse: [theirs] } }, HOOK);
+
+  const { settings } = removeHookFromSettings(installed.settings);
+
+  assert.deepEqual(postToolUse(settings), [theirs]);
+});
+
+test("remove: prunes the empty PostToolUse key but keeps other hook events", () => {
+  const existing = {
+    hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "guard" }] }] },
+  };
+  const installed = mergeHookIntoSettings(existing, HOOK);
+
+  const { settings } = removeHookFromSettings(installed.settings);
+
+  assert.equal((settings as any).hooks.PostToolUse, undefined);
+  assert.equal((settings as any).hooks.PreToolUse.length, 1);
+});
+
+test("remove: does not mutate the caller's settings object", () => {
+  const installed = mergeHookIntoSettings(undefined, HOOK);
+
+  removeHookFromSettings(installed.settings);
+
+  assert.equal(postToolUse(installed.settings).length, 1);
+});
+
+test("remove: refuses to touch a settings file that is not an object", () => {
+  assert.throws(() => removeHookFromSettings("not json"), /settings/i);
 });
 
 test("selfTest end to end: the built hook really does replace oversized output", async () => {
