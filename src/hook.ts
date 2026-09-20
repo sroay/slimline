@@ -24,6 +24,17 @@ export const HEAD_LINES = 40;
 export const TAIL_LINES = 40;
 export const MAX_SIGNAL_LINES = 50;
 
+/**
+ * A line count alone misses the worst payloads: minified bundles, single-line
+ * JSON, base64 blobs — megabytes of tokens in a handful of newlines. Adversarial
+ * testing confirmed a 5MB one-liner passed straight through. Characters are the
+ * thing we actually pay for, so they get their own ceiling.
+ */
+export const THRESHOLD_CHARS = 20000;
+export const READ_THRESHOLD_CHARS = 60000;
+export const HEAD_CHARS = 2000;
+export const TAIL_CHARS = 2000;
+
 // Deliberately broad: false positives (an extra kept line) are harmless, false
 // negatives (a missed real error) are the failure mode this exists to prevent.
 export const SIGNAL_PATTERN = /\b(error|fail(?:ed|ure)?|exception|traceback|panic|fatal)\b/i;
@@ -35,10 +46,15 @@ export interface TruncationResult {
 
 export function truncateText(
   text: string,
-  thresholdLines: number = THRESHOLD_LINES
+  thresholdLines: number = THRESHOLD_LINES,
+  thresholdChars: number = THRESHOLD_CHARS
 ): TruncationResult | null {
   const lines = text.split("\n");
-  if (lines.length <= thresholdLines) return null;
+
+  if (lines.length <= thresholdLines) {
+    // Too few lines to truncate by line, but possibly still enormous by volume.
+    return text.length > thresholdChars ? truncateByChars(text) : null;
+  }
 
   const head = lines.slice(0, HEAD_LINES);
   const tail = lines.slice(lines.length - TAIL_LINES);
@@ -63,6 +79,43 @@ export function truncateText(
   return { text: parts.join("\n"), omittedLines: middle.length };
 }
 
+/**
+ * Volume-based fallback for payloads with too few newlines to slice by line.
+ * Still surfaces error lines when any newlines exist at all — a 10-line, 5MB
+ * payload can hide a failure just as easily as a 5,000-line one.
+ */
+function truncateByChars(text: string): TruncationResult {
+  const head = text.slice(0, HEAD_CHARS);
+  const tail = text.slice(text.length - TAIL_CHARS);
+  const middle = text.slice(HEAD_CHARS, text.length - TAIL_CHARS);
+  const omittedChars = middle.length;
+
+  const parts: string[] = [head];
+  parts.push(`\n[... ${omittedChars.toLocaleString()} characters omitted ...]\n`);
+
+  const signalLines = middle
+    .split("\n")
+    .filter((line) => SIGNAL_PATTERN.test(line))
+    // A single matching line could itself be megabytes, so cap its length too.
+    .map((line) => (line.length > 500 ? line.slice(0, 500) + " …[line truncated]" : line));
+
+  if (signalLines.length > 0) {
+    const shown = signalLines.slice(0, MAX_SIGNAL_LINES);
+    parts.push(
+      shown.length < signalLines.length
+        ? `[${signalLines.length} possible error/failure line(s) found in the omitted region, showing first ${shown.length}]:`
+        : `[${signalLines.length} possible error/failure line(s) found in the omitted region]:`
+    );
+    parts.push(shown.join("\n"));
+  }
+
+  parts.push(tail);
+
+  // omittedLines reports 0 here: nothing was dropped on a line basis, and
+  // reporting a fabricated line count would misrepresent what happened.
+  return { text: parts.join("\n"), omittedLines: 0 };
+}
+
 /** One payload within a tool_response that is a candidate for truncation. */
 interface Payload {
   key: string;
@@ -76,6 +129,7 @@ interface Payload {
  */
 interface ToolSpec {
   thresholdLines: number;
+  thresholdChars: number;
   getPayloads(response: any): Payload[];
   withReplacements(response: any, replacements: Map<string, string>): object;
 }
@@ -83,6 +137,7 @@ interface ToolSpec {
 export const TOOL_SPECS: Record<string, ToolSpec> = {
   Bash: {
     thresholdLines: THRESHOLD_LINES,
+    thresholdChars: THRESHOLD_CHARS,
     getPayloads(response) {
       const payloads: Payload[] = [];
       if (typeof response.stdout === "string") payloads.push({ key: "stdout", text: response.stdout });
@@ -101,6 +156,7 @@ export const TOOL_SPECS: Record<string, ToolSpec> = {
 
   Grep: {
     thresholdLines: THRESHOLD_LINES,
+    thresholdChars: THRESHOLD_CHARS,
     getPayloads(response) {
       // Only content mode carries a large string. files_with_matches/count return
       // filename arrays that are already modest, and cutting a file list risks
@@ -115,6 +171,7 @@ export const TOOL_SPECS: Record<string, ToolSpec> = {
 
   WebFetch: {
     thresholdLines: THRESHOLD_LINES,
+    thresholdChars: THRESHOLD_CHARS,
     getPayloads(response) {
       if (typeof response.result !== "string") return [];
       return [{ key: "result", text: response.result }];
@@ -126,6 +183,7 @@ export const TOOL_SPECS: Record<string, ToolSpec> = {
 
   Read: {
     thresholdLines: READ_THRESHOLD_LINES,
+    thresholdChars: READ_THRESHOLD_CHARS,
     getPayloads(response) {
       if (!response.file || typeof response.file.content !== "string") return [];
       return [{ key: "file.content", text: response.file.content }];
@@ -182,7 +240,7 @@ export function handleEvent(
 
   const truncated = new Map<string, TruncationResult>();
   for (const payload of payloads) {
-    const result = truncateText(payload.text, spec.thresholdLines);
+    const result = truncateText(payload.text, spec.thresholdLines, spec.thresholdChars);
     if (result) truncated.set(payload.key, result);
   }
   if (truncated.size === 0) {
@@ -250,7 +308,20 @@ function parseStatsDir(argv: string[]): string | undefined {
   return i !== -1 && argv[i + 1] ? argv[i + 1] : undefined;
 }
 
+/**
+ * Kill switch. Set SLIMLINE_DISABLED=1 to make every invocation an immediate
+ * no-op without editing settings.json mid-session. A tool that silently rewrites
+ * what the model sees needs a way to be switched off in one move when something
+ * looks wrong, rather than by hand-editing JSON under pressure.
+ */
+function isDisabled(): boolean {
+  const flag = process.env.SLIMLINE_DISABLED;
+  return flag === "1" || flag === "true";
+}
+
 async function main(): Promise<void> {
+  if (isDisabled()) process.exit(0);
+
   const raw = await readStdin();
   let input: PostToolUseInput;
   try {

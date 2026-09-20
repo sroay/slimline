@@ -34,6 +34,32 @@ test("truncateText: honours a custom threshold", () => {
   assert.ok(truncateText(text, 300), "over the lower threshold, truncated");
 });
 
+// Regression: adversarial testing found a 5MB single-line payload passing
+// through untouched, because the threshold only counted lines.
+test("truncateText: catches a huge payload with no newlines at all", () => {
+  const oneHugeLine = "x".repeat(5 * 1024 * 1024);
+  const result = truncateText(oneHugeLine);
+  assert.ok(result, "a 5MB one-liner must not pass through untouched");
+  assert.ok(result!.text.length < 20000, "must actually shrink, drastically");
+  assert.ok(result!.text.includes("characters omitted"));
+});
+
+test("truncateText: catches few-but-enormous lines", () => {
+  const result = truncateText(Array.from({ length: 10 }, () => "y".repeat(500 * 1024)).join("\n"));
+  assert.ok(result, "10 lines of 500KB each must not pass through untouched");
+  assert.ok(result!.text.length < 20000);
+});
+
+test("truncateText: surfaces error lines even on the character-based path", () => {
+  const text = "a".repeat(30000) + "\nFATAL: buried in a giant blob\n" + "b".repeat(30000);
+  const result = truncateText(text);
+  assert.ok(result!.text.includes("FATAL: buried in a giant blob"));
+});
+
+test("truncateText: a modest payload under both thresholds is still untouched", () => {
+  assert.equal(truncateText("short output\nsecond line"), null);
+});
+
 test("handleEvent: unsupported tool is a no-op regardless of size", () => {
   const output = handleEvent(
     { tool_name: "Write", tool_response: { content: makeLines(THRESHOLD_LINES + 500) } },
