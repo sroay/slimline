@@ -157,6 +157,24 @@ export function computeOmission(
   };
 }
 
+/**
+ * Truncation assumes the omitted middle is filler. That holds for logs, CSVs and
+ * data dumps; it is false for source code, where the middle is the actual content.
+ * Cutting a 6,000-line component down to 80 lines does not save the model
+ * anything — it blinds it, and the tokens come straight back as re-reads.
+ *
+ * So Read only truncates data-shaped files. Source, markdown and markup pass
+ * through untouched however large they are.
+ */
+const DATA_FILE_EXTENSIONS = /\.(csv|tsv|log|jsonl|ndjson|map|json)$/i;
+const LOCK_FILES = /(^|[\\/])(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|composer\.lock|Cargo\.lock|poetry\.lock)$/i;
+const MINIFIED = /\.min\.(js|css)$|bundle\.js$/i;
+
+export function isDataShapedFile(filePath: unknown): boolean {
+  if (typeof filePath !== "string") return false;
+  return DATA_FILE_EXTENSIONS.test(filePath) || LOCK_FILES.test(filePath) || MINIFIED.test(filePath);
+}
+
 /** One payload within a tool_response that is a candidate for truncation. */
 interface Payload {
   key: string;
@@ -227,6 +245,7 @@ export const TOOL_SPECS: Record<string, ToolSpec> = {
     thresholdChars: READ_THRESHOLD_CHARS,
     getPayloads(response) {
       if (!response.file || typeof response.file.content !== "string") return [];
+      if (!isDataShapedFile(response.file.filePath)) return [];
       return [{ key: "file.content", text: response.file.content }];
     },
     withReplacements(response, replacements) {

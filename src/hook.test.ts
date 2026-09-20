@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
-import { handleEvent, truncateText, THRESHOLD_LINES, READ_THRESHOLD_LINES } from "./hook";
+import { handleEvent, truncateText, isDataShapedFile, THRESHOLD_LINES, READ_THRESHOLD_LINES } from "./hook";
 
 function makeLines(count: number, fill = "line"): string {
   return Array.from({ length: count }, (_, i) => `${fill} ${i}`).join("\n");
@@ -184,7 +184,10 @@ test("handleEvent: Read truncates the NESTED file.content and keeps the wrapper 
       tool_response: {
         type: "text",
         file: {
-          filePath: "/tmp/project/big.txt",
+          // .csv, not .txt: `.txt` is deliberately NOT data-shaped, since a big
+          // one is as likely to be notes as a dump, and blinding the model on
+          // prose costs more than the tokens saved.
+          filePath: "/tmp/project/big.csv",
           content: bigFile,
           numLines: 1300,
           startLine: 1,
@@ -200,8 +203,66 @@ test("handleEvent: Read truncates the NESTED file.content and keeps the wrapper 
   // ignored by Claude Code, so the nesting must be reproduced exactly.
   assert.equal(updated.type, "text");
   assert.ok(updated.file.content.length < bigFile.length);
-  assert.equal(updated.file.filePath, "/tmp/project/big.txt");
+  assert.equal(updated.file.filePath, "/tmp/project/big.csv");
   assert.equal(updated.file.totalLines, 1300);
+});
+
+// A survey of real projects found 113 oversized files that were mostly source
+// (.tsx/.ts/.md), not data. Truncating those would blind the model mid-task.
+test("handleEvent: a huge SOURCE file is left completely alone", () => {
+  for (const file of ["/app/settings/page.tsx", "/lib/registry.ts", "/docs/plan.md", "/x/report.html", "/s/main.py"]) {
+    const output = handleEvent(
+      {
+        tool_name: "Read",
+        tool_response: {
+          type: "text",
+          file: {
+            filePath: file,
+            content: makeLines(READ_THRESHOLD_LINES + 5000),
+            numLines: 5800,
+            startLine: 1,
+            totalLines: 5800,
+          },
+        },
+      },
+      noCache
+    );
+    assert.equal(output, null, `${file} must pass through untouched — source has no filler middle`);
+  }
+});
+
+test("handleEvent: data-shaped files are still truncated", () => {
+  for (const file of ["/data/prospects.csv", "/logs/build.log", "/pkg/package-lock.json", "/dist/app.min.js", "/x/events.jsonl"]) {
+    const result = handleEvent(
+      {
+        tool_name: "Read",
+        cwd: "/tmp/p",
+        session_id: "s",
+        tool_use_id: "t",
+        tool_response: {
+          type: "text",
+          file: {
+            filePath: file,
+            content: makeLines(READ_THRESHOLD_LINES + 5000),
+            numLines: 5800,
+            startLine: 1,
+            totalLines: 5800,
+          },
+        },
+      },
+      () => {}
+    );
+    assert.ok(result, `${file} should still be truncated — it is data, not code`);
+  }
+});
+
+test("isDataShapedFile: classifies correctly and survives a missing path", () => {
+  assert.equal(isDataShapedFile("/a/b.csv"), true);
+  assert.equal(isDataShapedFile("C:\\proj\\package-lock.json"), true);
+  assert.equal(isDataShapedFile("/a/app.tsx"), false);
+  assert.equal(isDataShapedFile("/a/README.md"), false);
+  assert.equal(isDataShapedFile(undefined), false);
+  assert.equal(isDataShapedFile(42), false);
 });
 
 test("handleEvent: Read uses its higher threshold (a 500-line read is untouched)", () => {
