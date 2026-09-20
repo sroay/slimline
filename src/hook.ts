@@ -177,6 +177,7 @@ export function handleEvent(
       truncated,
       beforeChars,
       afterChars,
+      project: input.cwd ? path.basename(input.cwd) : undefined,
     });
 
   const truncated = new Map<string, TruncationResult>();
@@ -236,6 +237,19 @@ function writeCacheToDisk(cachePath: string, content: string): void {
   fs.writeFileSync(cachePath, content, "utf8");
 }
 
+/**
+ * `--stats-dir <path>` sends the savings log somewhere central so one install can
+ * monitor several projects and still report a single aggregate number.
+ *
+ * The cache deliberately does NOT follow it: Claude retrieves a cached original
+ * with its own Read tool, and a path outside the session's working directory
+ * triggers a permission prompt. Frictionless retrieval matters more than tidiness.
+ */
+function parseStatsDir(argv: string[]): string | undefined {
+  const i = argv.indexOf("--stats-dir");
+  return i !== -1 && argv[i + 1] ? argv[i + 1] : undefined;
+}
+
 async function main(): Promise<void> {
   const raw = await readStdin();
   let input: PostToolUseInput;
@@ -246,7 +260,8 @@ async function main(): Promise<void> {
   }
 
   const cwd = input.cwd || process.cwd();
-  const output = handleEvent(input, writeCacheToDisk, (event) => logEvent(cwd, event));
+  const statsDir = parseStatsDir(process.argv) || cwd;
+  const output = handleEvent(input, writeCacheToDisk, (event) => logEvent(statsDir, event));
   if (output) {
     process.stdout.write(JSON.stringify(output));
   }

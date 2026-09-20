@@ -18,6 +18,8 @@ export interface StatsEvent {
   truncated: boolean;
   beforeChars: number;
   afterChars: number;
+  /** Project the call came from. Present once one log aggregates several projects. */
+  project?: string;
 }
 
 /**
@@ -51,6 +53,7 @@ export interface Summary {
   reductionOnTruncated: number;
   reductionOverall: number;
   byTool: Record<string, { calls: number; truncated: number; charsSaved: number }>;
+  byProject: Record<string, { calls: number; truncated: number; charsSaved: number }>;
   firstSeen?: string;
   lastSeen?: string;
 }
@@ -67,6 +70,7 @@ export function summarize(events: StatsEvent[]): Summary {
     reductionOnTruncated: 0,
     reductionOverall: 0,
     byTool: {},
+    byProject: {},
   };
 
   let truncatedBefore = 0;
@@ -79,11 +83,19 @@ export function summarize(events: StatsEvent[]): Summary {
 
     const tool = (summary.byTool[e.tool] ??= { calls: 0, truncated: 0, charsSaved: 0 });
     tool.calls++;
+    const project = (summary.byProject[e.project || "(unknown)"] ??= {
+      calls: 0,
+      truncated: 0,
+      charsSaved: 0,
+    });
+    project.calls++;
 
     if (e.truncated) {
       summary.truncatedCalls++;
       tool.truncated++;
       tool.charsSaved += e.beforeChars - e.afterChars;
+      project.truncated++;
+      project.charsSaved += e.beforeChars - e.afterChars;
       truncatedBefore += e.beforeChars;
       truncatedAfter += e.afterChars;
     }
@@ -148,6 +160,17 @@ export function formatReport(summary: Summary): string {
       `  ${tool.padEnd(10)} ${String(s.calls).padStart(4)} calls, ${String(s.truncated).padStart(4)} truncated, ` +
         `${s.charsSaved.toLocaleString()} chars saved`
     );
+  }
+  const projects = Object.entries(summary.byProject);
+  if (projects.length > 1 || (projects.length === 1 && projects[0][0] !== "(unknown)")) {
+    lines.push("");
+    lines.push("By project:");
+    for (const [project, s] of projects.sort((a, b) => b[1].charsSaved - a[1].charsSaved)) {
+      lines.push(
+        `  ${project.padEnd(24)} ${String(s.calls).padStart(4)} calls, ${String(s.truncated).padStart(4)} truncated, ` +
+          `${s.charsSaved.toLocaleString()} chars saved`
+      );
+    }
   }
   lines.push("");
   lines.push("Note: 'reduction across all calls' counts only tool output passing through");
