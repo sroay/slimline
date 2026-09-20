@@ -29,10 +29,11 @@
   ],
   "scripts": {
     "build": "tsc",
-    "test": "node --test dist/*.test.js",
+    "test": "node scripts/run-tests.js",
     "stats": "node dist/stats.js",
     "audit": "node dist/audit.js",
     "doctor": "node dist/cli.js doctor",
+    "smoke": "node scripts/ci-smoke.js",
     "prepublishOnly": "npm run build && npm test"
   },
   "devDependencies": {

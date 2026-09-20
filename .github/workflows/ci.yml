@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # slimline ships as a hook script that other people's Claude Code runs on their
+    # own machine, so "works on my box" is not evidence. Every supported OS and Node
+    # version runs the real built script, not a mock.
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['18', '20', '22', '24']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Cross-platform smoke test
+        # Drives the built hook as a child process with real stdin fixtures:
+        # path separators, directories with spaces, CRLF, cache writes, no-op
+        # passthrough, the kill switch, and malformed input.
+        run: npm run smoke
+
+      - name: Self-test via the CLI
+        run: npm run doctor
+
+  package:
+    # Proves the published tarball is installable and that the bin actually runs —
+    # a packaging mistake (missing file, lost shebang) would not show up above.
+    name: package install / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Pack and install globally
+        shell: bash
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP"
+          npm install -g "$RUNNER_TEMP"/slimline-*.tgz
+
+      - name: The installed binary works
+        shell: bash
+        run: |
+          slimline doctor
+          slimline help
+
+      - name: Install into a settings file, then remove it cleanly
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/proj with space/.claude"
+          cd "$RUNNER_TEMP/proj with space"
+          printf '{"model":"opus"}' > .claude/settings.local.json
+
+          slimline install --project
+          node -e "
+            const s = require('fs').readFileSync('.claude/settings.local.json','utf8');
+            const j = JSON.parse(s);
+            if (j.model !== 'opus') throw new Error('existing settings were clobbered');
+            if (j.hooks.PostToolUse.length !== 1) throw new Error('hook not registered');
+          "
+
+          slimline install --project   # idempotent
+          node -e "
+            const j = JSON.parse(require('fs').readFileSync('.claude/settings.local.json','utf8'));
+            if (j.hooks.PostToolUse.length !== 1) throw new Error('reinstall duplicated the entry');
+          "
+
+          slimline uninstall --project
+          node -e "
+            const j = JSON.parse(require('fs').readFileSync('.claude/settings.local.json','utf8'));
+            if (j.hooks) throw new Error('uninstall left litter behind');
+            if (j.model !== 'opus') throw new Error('uninstall damaged unrelated settings');
+          "

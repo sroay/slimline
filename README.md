@@ -64,12 +64,20 @@ This matters: [claude-code#68951](https://github.com/anthropics/claude-code/issu
 A 1,000-line build log becomes something like:
 
 ```
-[first 40 lines]
-… slimline: 960 lines omitted (30,000 → 3,527 chars) …
-[50 lines matching error/fail/exception/traceback/panic/fatal]
-[last 40 lines]
-Full output as received: .claude/slimline-cache/<session>/<tool_use_id>.txt
+line 0 of ordinary build chatter
+... (first 40 lines) ...
+
+[... 920 lines omitted ...]
+
+[1 possible error/failure line(s) found in the omitted region]:
+ERROR: build failed at module 417
+line 960 of ordinary build chatter
+... (last 40 lines) ...
+
+[Output as received cached at: /proj/.claude/slimline-cache/<session>/<tool_use_id>.txt — Read it if the above isn't enough]
 ```
+
+The buried error on line 500 survives. Lines matching `error`, `fail`, `exception`, `traceback`, `panic` or `fatal` are pulled out of the omitted region and shown, capped at 50.
 
 Claude reads that cache file with its own `Read` tool when it needs the detail. The cache stays inside the project so retrieval doesn't trigger a permission prompt.
 
