@@ -116,6 +116,47 @@ function truncateByChars(text: string): TruncationResult {
   return { text: parts.join("\n"), omittedLines: 0 };
 }
 
+/**
+ * What a truncation actually dropped, for after-the-fact auditing.
+ *
+ * Mirrors truncateText's slicing so the audit reports on what Claude really saw
+ * rather than an approximation. A test asserts the two stay in agreement.
+ */
+export interface Omission {
+  mode: "none" | "lines" | "chars";
+  omitted: string[];
+  surfacedSignals: string[];
+  hiddenSignals: string[];
+}
+
+export function computeOmission(
+  text: string,
+  thresholdLines: number = THRESHOLD_LINES,
+  thresholdChars: number = THRESHOLD_CHARS
+): Omission {
+  const lines = text.split("\n");
+  let omitted: string[];
+  let mode: "none" | "lines" | "chars";
+
+  if (lines.length > thresholdLines) {
+    omitted = lines.slice(HEAD_LINES, lines.length - TAIL_LINES);
+    mode = "lines";
+  } else if (text.length > thresholdChars) {
+    omitted = text.slice(HEAD_CHARS, text.length - TAIL_CHARS).split("\n");
+    mode = "chars";
+  } else {
+    return { mode: "none", omitted: [], surfacedSignals: [], hiddenSignals: [] };
+  }
+
+  const signals = omitted.filter((line) => SIGNAL_PATTERN.test(line));
+  return {
+    mode,
+    omitted,
+    surfacedSignals: signals.slice(0, MAX_SIGNAL_LINES),
+    hiddenSignals: signals.slice(MAX_SIGNAL_LINES),
+  };
+}
+
 /** One payload within a tool_response that is a candidate for truncation. */
 interface Payload {
   key: string;
