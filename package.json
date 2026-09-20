@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "Claude Code PostToolUse hook that truncates oversized tool output (signal-aware: preserves error/failure lines) to save subscription quota, with a local retrievable cache of the original.",
   "license": "MIT",
+  "author": "Chetan Sroay",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sroay/slimline.git"
+  },
+  "homepage": "https://github.com/sroay/slimline#readme",
+  "bugs": {
+    "url": "https://github.com/sroay/slimline/issues"
+  },
   "type": "commonjs",
   "main": "dist/hook.js",
   "bin": {
