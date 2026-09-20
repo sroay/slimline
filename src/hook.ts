@@ -393,10 +393,17 @@ async function main(): Promise<void> {
   const cwd = input.cwd || process.cwd();
   const statsDir = parseStatsDir(process.argv) || cwd;
   const output = handleEvent(input, writeCacheToDisk, (event) => logEvent(statsDir, event));
-  if (output) {
-    process.stdout.write(JSON.stringify(output));
-  }
-  process.exit(0);
+  if (!output) process.exit(0);
+
+  // Wait for the flush before exiting. process.stdout.write to a PIPE is synchronous
+  // on Windows but ASYNCHRONOUS on macOS and Linux, so writing and then calling
+  // process.exit(0) cuts the reply off mid-JSON there. Claude Code discards a reply
+  // it cannot parse without reporting anything, so the hook would appear installed
+  // and healthy while doing nothing — the exact silent failure this project exists
+  // to avoid. The error handler covers a reader that has already gone away (EPIPE),
+  // which must not leave the hook hanging on a tool call.
+  process.stdout.on("error", () => process.exit(0));
+  process.stdout.write(JSON.stringify(output), () => process.exit(0));
 }
 
 if (require.main === module) {

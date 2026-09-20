@@ -149,6 +149,31 @@ try {
     assert.ok(fs.existsSync(match[1]), `marker points at ${match[1]}, which does not exist`);
   });
 
+  check("a large reply survives the pipe — no truncated JSON", () => {
+    // Regression guard. process.stdout.write to a PIPE is synchronous on Windows but
+    // asynchronous on macOS and Linux, so `write(); process.exit(0)` silently cut the
+    // reply off mid-JSON there. Claude Code then discards it with no error, and the
+    // hook does nothing while appearing installed. Caught by CI on macOS, invisible
+    // on Windows. 50 long error lines push the reply past any pipe buffer so this
+    // reproduces on the first try rather than by luck.
+    const longError = "ERROR: " + "failure detail ".repeat(200);
+    const lines = Array.from({ length: 2000 }, (_, i) =>
+      i % 20 === 0 ? `${longError} #${i}` : `line ${i} of ordinary chatter`,
+    );
+    const { stdout, status } = runHook({
+      session_id: "ci-session",
+      tool_use_id: "call_big",
+      tool_name: "Bash",
+      cwd: projectDir,
+      tool_response: { stdout: lines.join("\n"), stderr: "", interrupted: false, isImage: false },
+    });
+
+    assert.equal(status, 0);
+    assert.ok(stdout.length > 64 * 1024, `reply was ${stdout.length} bytes — too small to test this`);
+    const updated = updatedOutput(stdout); // throws if the JSON arrived truncated
+    assert.ok(updated.stdout.includes("ERROR:"), "error lines should survive");
+  });
+
   check("small output passes through untouched", () => {
     const { stdout, status } = runHook({
       session_id: "ci-session",
