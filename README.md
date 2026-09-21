@@ -17,13 +17,26 @@ Measured across 30 days of real Claude Code transcripts (1,827 sessions, 89.6B t
 
 **Tool-output compression has a ceiling of roughly 2%.** The dominant cost is that every token in your context gets re-billed on every later turn — about 28.5× on average. Session cost grows with the *square* of session length.
 
+What slimline actually captured, measured over 11 hours of real work across several projects:
+
+| | |
+| --- | --- |
+| Tool calls seen | 432 |
+| Calls truncated | 6 — a **1.4% hit rate** |
+| Context saved | ~416K tokens (~12M billed, after re-reads) |
+| Share of total quota | **roughly 0.4–0.9%** |
+
+Two of those six calls — both reads of large data files — produced 91% of the savings. So the value is spiky rather than steady, and six events is thin evidence; treat the range as an order of magnitude, not a promise.
+
+It also isn't where you might expect. Claude Code already caps `Bash` output at 30,000 characters, so no single command can save more than ~26K. **The real wins are reads of big CSV, JSON, log and lock files.** If your work involves a lot of those, you'll get more out of this than the numbers above suggest; if it doesn't, you'll get less.
+
 So before installing this, do the thing that's worth 10–50×:
 
 - `/clear` between unrelated tasks instead of carrying one session all day
 - Delegate wide searches to a subagent so the bulk never enters your main thread
 - Don't resume marathon sessions
 
-slimline is worth having once you've done that — it's free, it runs locally, and it protects long autonomous loops from drowning in log output. It is not a fix for a 19,000-turn session.
+slimline is worth having once you've done that — it's free, it runs locally, and when a huge data file or log does land in context, it keeps the head, the tail and the errors instead of all of it. It is not a fix for a 19,000-turn session.
 
 ## Install
 
