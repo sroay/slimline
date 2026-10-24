@@ -369,14 +369,29 @@ function parseStatsDir(argv: string[]): string | undefined {
 }
 
 /**
- * Kill switch. Set SLIMLINE_DISABLED=1 to make every invocation an immediate
- * no-op without editing settings.json mid-session. A tool that silently rewrites
- * what the model sees needs a way to be switched off in one move when something
- * looks wrong, rather than by hand-editing JSON under pressure.
+ * Kill switches. Either makes every invocation an immediate no-op, without editing
+ * settings.json mid-session. A tool that silently rewrites what the model sees
+ * needs to be switchable off in one move when something looks wrong, rather than
+ * by hand-editing JSON under pressure.
+ *
+ *   SLIMLINE_DISABLED=1     silences slimline alone
+ *   LOCAL_HOOKS_DISABLED=1  silences every local hook tool that honours it
+ *
+ * The shared name is deliberately not `CLAUDE_*`: this is a convention between
+ * tools on one machine, not a built-in Claude Code setting, and a name implying
+ * otherwise would mislead anyone who did not write it.
+ *
+ * Only `1` and `true` disable. Anything else, including the empty string, leaves
+ * slimline running — on Windows `setx NAME ""` leaves an empty value behind rather
+ * than removing the variable, and treating that as "off" would disable the tool
+ * permanently and invisibly.
  */
-function isDisabled(): boolean {
-  const flag = process.env.SLIMLINE_DISABLED;
-  return flag === "1" || flag === "true";
+export function isDisabled(env: Record<string, string | undefined> = process.env): boolean {
+  for (const name of ["SLIMLINE_DISABLED", "LOCAL_HOOKS_DISABLED"]) {
+    const value = (env[name] ?? "").trim().toLowerCase();
+    if (value === "1" || value === "true") return true;
+  }
+  return false;
 }
 
 async function main(): Promise<void> {

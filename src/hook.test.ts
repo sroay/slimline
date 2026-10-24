@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
-import { handleEvent, truncateText, isDataShapedFile, THRESHOLD_LINES, READ_THRESHOLD_LINES } from "./hook";
+import { handleEvent, truncateText, isDataShapedFile, THRESHOLD_LINES, READ_THRESHOLD_LINES, isDisabled } from "./hook";
 
 function makeLines(count: number, fill = "line"): string {
   return Array.from({ length: count }, (_, i) => `${fill} ${i}`).join("\n");
@@ -277,4 +277,33 @@ test("handleEvent: Read uses its higher threshold (a 500-line read is untouched)
     noCache
   );
   assert.equal(output, null, "500 lines is over Bash's threshold but under Read's");
+});
+
+// --- kill switches -------------------------------------------------------
+
+test("isDisabled: a clean environment leaves slimline running", () => {
+  assert.equal(isDisabled({}), false);
+});
+
+test("isDisabled: slimline's own switch still works, as documented", () => {
+  assert.equal(isDisabled({ SLIMLINE_DISABLED: "1" }), true);
+  assert.equal(isDisabled({ SLIMLINE_DISABLED: "true" }), true);
+});
+
+test("isDisabled: the shared switch turns off every local hook tool at once", () => {
+  assert.equal(isDisabled({ LOCAL_HOOKS_DISABLED: "1" }), true);
+  assert.equal(isDisabled({ LOCAL_HOOKS_DISABLED: "true" }), true);
+});
+
+test("isDisabled: only 1 and true count, so a cleared variable cannot silence it", () => {
+  // `setx NAME ""` leaves an empty value rather than removing the variable; if
+  // that read as "off", slimline would be permanently and invisibly disabled.
+  for (const value of ["", "0", "false", "no", " "]) {
+    assert.equal(isDisabled({ SLIMLINE_DISABLED: value }), false, `"${value}"`);
+    assert.equal(isDisabled({ LOCAL_HOOKS_DISABLED: value }), false, `"${value}"`);
+  }
+});
+
+test("isDisabled: case and surrounding space are tolerated", () => {
+  assert.equal(isDisabled({ LOCAL_HOOKS_DISABLED: " TRUE " }), true);
 });

@@ -126,6 +126,15 @@ setx SLIMLINE_DISABLED 1     # Windows, persistent
 slimline uninstall           # remove the hook entirely
 ```
 
+If you run more than one local hook tool, `LOCAL_HOOKS_DISABLED=1` silences all of
+them that honour it, slimline included — one variable instead of remembering which
+tool uses which name. It is a convention between tools on your own machine, **not**
+a built-in Claude Code setting.
+
+Only `1` and `true` disable. Anything else, including an empty value, leaves
+slimline running — on Windows `setx NAME ""` leaves the variable set but empty, and
+treating that as "off" would disable the hook permanently and invisibly.
+
 `uninstall` removes only slimline's own entry and prunes the empty containers it leaves behind. Everything else in your settings file is untouched.
 
 ## Limits worth knowing
