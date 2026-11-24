@@ -40,8 +40,12 @@ slimline is worth having once you've done that — it's free, it runs locally, a
 
 ## Install
 
+Not yet published to npm, so install from source:
+
 ```bash
-npm install -g slimline && slimline install
+git clone https://github.com/sroay/slimline.git
+cd slimline && npm install && npm run build
+node dist/cli.js install
 ```
 
 This writes a `PostToolUse` hook into `~/.claude/settings.json`, covering every local project. It refuses to install if the hook doesn't actually work on your Claude Code version (see [Verify](#verify)).
